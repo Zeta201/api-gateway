@@ -1,0 +1,32 @@
+# =====================================================================
+# Envoy specific Bazel build/test options.
+# =====================================================================
+
+# Keep envoy.bazelrc up-to-date by run:
+# curl -sSL https://raw.githubusercontent.com/envoyproxy/envoy-wasm/master/.bazelrc > envoy.bazelrc
+import %workspace%/envoy.bazelrc
+
+# Use platforms based toolchain resolution
+build --incompatible_enable_cc_toolchain_resolution
+build --platform_mappings=bazel/platform_mappings
+
+# Enable path normalization by default.
+# See: https://github.com/envoyproxy/envoy/pull/6519
+build --define path_normalization_by_default=true
+
+# release builds are optimized
+build:release -c opt
+
+# No debug info for release builds
+build:release --define no_debug_info=1
+build:release --linkopt=-Wl,--strip-all
+build:release --features=-per_object_debug_info
+build:release --fission=dbg
+
+# Manual link stamping, forces link to include current git SHA even if binary is otherwise
+# upto-date
+build --define manual_stamp=manual_stamp
+
+# Always have LD_LIBRARY_PATH=/usr/cross-compat/lib defined in the test environment.
+# The path does not need to exist, but can be created when needed for running tests.
+build --test_env=LD_LIBRARY_PATH=/usr/cilium-cross-compat/lib

@@ -1,0 +1,23 @@
+go get github.com/gin-gonic/gin
+go get -u github.com/go-sql-driver/mysql
+go get github.com/gin-contrib/cors
+go get gorm.io/driver/mysql
+go get gorm.io/gorm
+
+
+
+docker exec -it kind-control-plane /bin/bash
+docker run -p 3307:3306 --env MYSQL_ROOT_PASSWORD=root --env DB_USER=root --env DB_PASSWORD=root 
+kind load docker-image registration-service:1.0 --name kind
+docker build -t registration-service:1.0 .
+
+
+Registration service
+curl -sL 'http://localhost:8080/api/v1/registration-service/' | jq
+curl -sL 'http://localhost:8080/api/v1/registration-service/' | jq
+curl -sL 'http://localhost:8080/api/v1/registration-service/' | jq
+
+curl -sL -XPOST -d '{"id":"2","firstname":"Jack","lastname":"Smith","course":"Chemistry","city":"Jaffna"}' 'http://localhost:8080/api/v1/registration-service/register' | jq
+    
+
+

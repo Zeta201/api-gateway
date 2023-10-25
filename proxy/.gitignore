@@ -1,0 +1,47 @@
+.DS_Store
+.idea/
+*.plist
+
+*cscope.files
+*cscope.out
+*cscope.in.out
+*cscope.po.out
+*tags
+
+# Bazel symlinks
+/bazel-*
+
+/cilium-envoy
+/cilium-envoy-starter
+/Dockerfile.istio_proxy
+/Dockerfile.builder-refresh
+
+# Emacs backup files
+*~
+
+# To run Envoy tests under gdb do "cd envoy && make debug && ln -s bazel-envoy/external external"
+/external
+
+# generated from make targets
+*.ok
+/proxylib/libcilium.so
+
+# Istio porting files 
+/envoy_bootstrap*.json
+
+# Clang config is platform-specific
+/clang.bazelrc
+
+# generated for docker builds via make
+/SOURCE_VERSION
+/.dockerignore
+
+# generated for Clion
+/.clwb
+
+/.vagrant
+
+/proxylib/libcilium.so*
+/proxylib/_obj*
+
+/BUILD_DEP_HASHES

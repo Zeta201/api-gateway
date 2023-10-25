@@ -1,0 +1,309 @@
+syntax = "proto3";
+
+option go_package = "github.com/cilium/proxy/go/cilium/api;cilium";
+
+package cilium;
+
+import "envoy/config/core/v3/address.proto";
+import "envoy/config/route/v3/route_components.proto";
+import "envoy/service/discovery/v3/discovery.proto";
+import "envoy/type/matcher/v3/metadata.proto";
+
+import "google/api/annotations.proto";
+
+import "envoy/annotations/resource.proto";
+import "validate/validate.proto";
+
+// [#protodoc-title: Network policy management and NPDS]
+
+// Each resource name is a network policy identifier.
+service NetworkPolicyDiscoveryService {
+  option (envoy.annotations.resource).type = "cilium.NetworkPolicy";
+
+  rpc StreamNetworkPolicies(stream envoy.service.discovery.v3.DiscoveryRequest)
+      returns (stream envoy.service.discovery.v3.DiscoveryResponse) {
+  }
+
+  rpc FetchNetworkPolicies(envoy.service.discovery.v3.DiscoveryRequest)
+      returns (envoy.service.discovery.v3.DiscoveryResponse) {
+    option (google.api.http) = {
+      post: "/v3/discovery:network_policies"
+      body: "*"
+    };
+  }
+}
+
+// A network policy that is enforced by a filter on the network flows to/from
+// associated hosts.
+message NetworkPolicy {
+  // IPs of the endpoint to which this policy applies.
+  // Required.
+  repeated string endpoint_ips = 1 [(validate.rules).repeated = {
+    min_items: 1,
+    max_items: 2,
+    items {string {min_len: 1}}
+  }];
+
+  // The endpoint identifier associated with the network policy.
+  // Required.
+  uint64 endpoint_id = 2;
+
+  // The part of the policy to be enforced at ingress by the filter, as a set
+  // of per-port network policies, one per destination L4 port.
+  // Every PortNetworkPolicy element in this set has a unique port / protocol
+  // combination.
+  // Optional. If empty, all flows in this direction are denied.
+  repeated PortNetworkPolicy ingress_per_port_policies = 3;
+
+  // The part of the policy to be enforced at egress by the filter, as a set
+  // of per-port network policies, one per destination L4 port.
+  // Every PortNetworkPolicy element in this set has a unique port / protocol
+  // combination.
+  // Optional. If empty, all flows in this direction are denied.
+  repeated PortNetworkPolicy egress_per_port_policies = 4;
+
+  // Name of the conntrack map to use with this policy.
+  // The paths to various Cilium conntrack maps are derived using this name.
+  // Optional. If empty, ipcache or hostmap lookup is used instead of conntrack
+  // map.
+  string conntrack_map_name = 5;
+}
+
+// A network policy to whitelist flows to a specific destination L4 port,
+// as a conjunction of predicates on L3/L4/L7 flows.
+// If all the predicates of a policy match a flow, the flow is whitelisted.
+message PortNetworkPolicy {
+  // The flows' destination L4 port number, as an unsigned 16-bit integer.
+  // If 0, all destination L4 port numbers are matched by this predicate.
+  uint32 port = 1 [(validate.rules).uint32.lte = 65535];
+
+  // The end of the destination port range, if non-zero.
+  uint32 end_port = 4 [(validate.rules).uint32.lte = 65535];
+
+  // The flows' L4 transport protocol.
+  // Required.
+  envoy.config.core.v3.SocketAddress.Protocol protocol = 2;
+
+  // The network policy rules to be enforced on the flows to the port.
+  // Optional. A flow is matched by this predicate if either the set of
+  // rules is empty or any of the rules matches it.
+  repeated PortNetworkPolicyRule rules = 3;
+}
+
+message TLSContext {
+  // CA certificates. If present, the counterparty must provide a valid
+  // certificate.
+  // Deprecated, use 'validation_context_sds_secret' instead.
+  string trusted_ca = 1;
+
+  // Certificate chain.
+  // Deprecated, use 'tls_sds_secret' instead.
+  string certificate_chain = 2;
+
+  // Private key
+  // Deprecated, use 'tls_sds_secret' instead.
+  string private_key = 3;
+
+  // Server Name Indicator. For downstream this helps choose the certificate to
+  // present to the client. For upstream this will be used as the SNI on the
+  // client connection.
+  repeated string server_names = 4;
+
+  // Name of an SDS secret for CA certificates. Secret is fetched from the same gRPC source as
+  // this Network Policy. If present, the counterparty must provide a valid certificate.
+  // May not be used at the same time with 'trusted_ca'.
+  string validation_context_sds_secret = 5;
+
+  // Name of an SDS secret for both TLS private key and certificate chain. Secret is fetched
+  // from the same gRPC source as this Network Policy.
+  // May not be used at the same time with 'certificate_chain' or 'private_key'.
+  string tls_sds_secret = 6;
+}
+
+// A network policy rule, as a conjunction of predicates on L3/L7 flows.
+// If all the predicates of a rule match a flow, the flow is matched by the
+// rule.
+message PortNetworkPolicyRule {
+  // Optional name for the rule, can be used in logging and error messages.
+  string name = 5;
+
+  // The set of identifiers of policies of remote hosts.
+  // A flow is matched by this predicate if the identifier of the policy
+  // applied on the flow's remote host is contained in this set.
+  // Optional. If not specified, any remote host is matched by this predicate.
+  // This field is deprecated, use remote_policies instead.
+  // TODO: Remove when Cilium 1.14 no longer supported.
+  repeated uint64 deprecated_remote_policies_64 = 1;
+  repeated uint32 remote_policies = 7;
+
+  // Optional downstream TLS context. If present, the incoming connection must
+  // be a TLS connection.
+  TLSContext downstream_tls_context = 3;
+
+  // Optional upstream TLS context. If present, the outgoing connection will use
+  // TLS.
+  TLSContext upstream_tls_context = 4;
+
+  // Optional allowed SNIs in TLS handshake.
+  repeated string server_names = 6;
+
+  // Optional L7 protocol parser name. This is only used if the parser is not
+  // one of the well knows ones. If specified, the l7 parser having this name
+  // needs to be built in to libcilium.so.
+  string l7_proto = 2;
+
+  // Optional. If not specified, any L7 request is matched by this predicate.
+  // All rules on any given port must have the same type of L7 rules!
+  oneof l7 {
+    // The set of HTTP network policy rules.
+    // An HTTP request is matched by this predicate if any of its rules matches
+    // the request.
+    HttpNetworkPolicyRules http_rules = 100;
+
+    // The set of Kafka network policy rules.
+    // A Kafka request is matched by this predicate if any of its rules matches
+    // the request.
+    KafkaNetworkPolicyRules kafka_rules = 101;
+
+    // Set of Generic policy rules used when 'l7_proto' is defined.
+    // Only to be used for l7 protocols for which a specific oneof
+    // is not defined
+    L7NetworkPolicyRules l7_rules = 102;
+  }
+}
+
+// A set of network policy rules that match HTTP requests.
+message HttpNetworkPolicyRules {
+  // The set of HTTP network policy rules.
+  // An HTTP request is matched if any of its rules matches the request.
+  // Required and may not be empty.
+  repeated HttpNetworkPolicyRule http_rules = 1 [(validate.rules).repeated .min_items = 1];
+}
+
+message HeaderMatch {
+  string name = 1 [(validate.rules).string.min_len = 1];
+  string value = 2; // empty for presence match. For secret data use 'value_sds_secret' instead.
+
+  // Action specifies what to do when the header matches.
+  enum MatchAction {
+    CONTINUE_ON_MATCH = 0; // Keep checking other matches (default)
+    FAIL_ON_MATCH = 1;     // Drop the request if no other rule matches
+    DELETE_ON_MATCH = 2;   // Remove the whole matching header
+  }
+  MatchAction match_action = 3;
+
+  enum MismatchAction {
+    FAIL_ON_MISMATCH = 0;     // Drop the request if no other rule matches (default)
+    CONTINUE_ON_MISMATCH = 1; // Keep checking other matches, log the mismatch
+    ADD_ON_MISMATCH = 2;      // Add 'value' to the multivalued header
+    DELETE_ON_MISMATCH = 3;   // Remove the whole mismatching header
+    REPLACE_ON_MISMATCH = 4;  // Replace the whole mismatching header with 'value'
+  }
+  MismatchAction mismatch_action = 4;
+
+  // Generic secret name for fetching value via SDS. Secret is fetched from the same gRPC source as
+  // this Network Policy.
+  string value_sds_secret = 5;
+}
+
+// An HTTP network policy rule, as a conjunction of predicates on HTTP requests.
+// If all the predicates of a rule match an HTTP request, the request is
+// allowed. Otherwise, it is denied.
+message HttpNetworkPolicyRule {
+  // A set of matchers on the HTTP request's headers' names and values.
+  // If all the matchers in this set match an HTTP request, the request is
+  // allowed by this rule. Otherwise, it is denied.
+  //
+  // Some special header names are:
+  //
+  // * *:uri*: The HTTP request's URI.
+  // * *:method*: The HTTP request's method.
+  // * *:authority*: Also maps to the HTTP 1.1 *Host* header.
+  //
+  // Optional. If empty, matches any HTTP request.
+  repeated envoy.config.route.v3.HeaderMatcher headers = 1;
+
+  // header_matches is a set of HTTP header name and value pairs that
+  // will be matched against the request headers, if all the other match
+  // requirements in 'headers' are met. Each HeaderAction determines what to do
+  // when there is a match or mismatch.
+  //
+  // Optional.
+  repeated HeaderMatch header_matches = 2;
+}
+
+// A set of network policy rules that match Kafka requests.
+message KafkaNetworkPolicyRules {
+  // The set of Kafka network policy rules.
+  // A Kafka request is matched if any of its rules matches the request.
+  // Required and may not be empty.
+  repeated KafkaNetworkPolicyRule kafka_rules = 1 [(validate.rules).repeated .min_items = 1];
+}
+
+// A Kafka network policy rule, as a conjunction of predicates on Kafka
+// requests. If all the predicates of a rule match a Kafka request, the request
+// is allowed. Otherwise, it is denied.
+message KafkaNetworkPolicyRule {
+  // The Kafka request's API version.
+  // If < 0, all Kafka requests are matched by this predicate.
+  int32 api_version = 1;
+
+  // Set of allowed API keys in the Kafka request.
+  // If none, all Kafka requests are matched by this predicate.
+  repeated int32 api_keys = 2;
+
+  // The Kafka request's client ID.
+  // Optional. If not specified, all Kafka requests are matched by this
+  // predicate. If specified, this predicates only matches requests that contain
+  // this client ID, and never matches requests that don't contain any client
+  // ID.
+  string client_id = 3 [(validate.rules).string.pattern = "^[a-zA-Z0-9._-]*$"];
+
+  // The Kafka request's topic.
+  // Optional. If not specified, this rule will not consider the Kafka request's
+  // topics. If specified, this predicates only matches requests that contain
+  // this topic, and never matches requests that don't contain any topic.
+  // However, messages that can not contain a topic will also me matched.
+  string topic = 4 [(validate.rules).string = {max_len: 255, pattern: "^[a-zA-Z0-9._-]*$"}];
+}
+
+// A set of network policy rules that match generic L7 requests.
+message L7NetworkPolicyRules {
+  // The set of allowing l7 policy rules.
+  // A request is allowed if any of these rules matches the request,
+  // and the request does not match any of the deny rules.
+  // Optional. If missing or empty then all requests are allowed, unless
+  // denied by a deny rule.
+  repeated L7NetworkPolicyRule l7_allow_rules = 1;
+
+  // The set of denying l7 policy rules.
+  // A request is denied if any of these rules matches the request.
+  // A request that is not denied may be allowed by 'l7_allow_rules'.
+  // Optional.
+  repeated L7NetworkPolicyRule l7_deny_rules = 2;
+}
+
+// A generic L7 policy rule, as a conjunction of predicates on l7 requests.
+// If all the predicates of a rule match a request, the request is allowed.
+// Otherwise, it is denied.
+message L7NetworkPolicyRule {
+  // Optional rule name, can be used in logging and error messages.
+  string name = 3;
+
+  // Generic rule for Go extensions.
+  // Optional. If empty, matches any request. Not allowed if 'metadata_rule' is
+  // present.
+  map<string, string> rule = 1;
+
+  // Generic rule for Envoy metadata enforcement. All matchers must match for
+  // the rule to allow the request/connection. Optional. If empty, matches any
+  // request. Not allowed if 'rule' is present.
+  repeated envoy.type.matcher.v3.MetadataMatcher metadata_rule = 2;
+}
+
+// Cilium's network policy manager fills this message with all currently known network policies.
+message NetworkPoliciesConfigDump {
+
+  // The loaded networkpolicy configs.
+  repeated NetworkPolicy networkpolicies = 1;
+}

@@ -1,0 +1,72 @@
+# Copyright 2017-2021 Authors of Cilium
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+CHECK_FORMAT ?= ./bazel-bin/check_format.py
+
+BAZEL_CACHE ?= ~/.cache/bazel
+BAZEL_ARCHIVE ?= ~/bazel-cache.tar.bz2
+
+all: precheck envoy-default
+
+# @envoy_api//:v3_protos must be built before invoking Makefile.api
+API_DEPS = @envoy_api//:v3_protos
+PROTOC_TARGET = @com_google_protobuf//:protoc
+api: force-non-root Makefile.api install-bazel
+	PROTOC=`$(BAZEL) cquery --output=starlark --starlark:expr=target.files_to_run.executable.path $(PROTOC_TARGET) | grep fastbuild/bin/external`; \
+	$(BAZEL) build $(PROTOC_TARGET) $(API_DEPS); \
+	file $${PROTOC} && PROTOC=$${PROTOC} $(MAKE) -f Makefile.api all
+
+api-clean:
+	find go -name *.pb.go -delete
+	find go -name *.pb.validate.go -delete
+	find go -empty -type d -delete
+	mkdir -p go/contrib/envoy
+	mkdir go/envoy
+
+envoy-default: $(COMPILER_DEP) SOURCE_VERSION install-bazel
+	@$(ECHO_BAZEL)
+	$(BAZEL) $(BAZEL_OPTS) build $(BAZEL_BUILD_OPTS) //:cilium-envoy $(BAZEL_FILTER)
+
+debug: envoy-debug
+
+envoy-debug: $(COMPILER_DEP) SOURCE_VERSION install-bazel
+	@$(ECHO_BAZEL)
+	$(BAZEL) $(BAZEL_OPTS) build $(BAZEL_BUILD_OPTS) -c dbg //:cilium-envoy $(BAZEL_FILTER)
+
+$(CHECK_FORMAT): force-non-root SOURCE_VERSION install-bazel clang.bazelrc
+	$(BAZEL) $(BAZEL_OPTS) build $(BAZEL_BUILD_OPTS) //:check_format.py
+
+veryclean: force-non-root clean
+	-sudo $(BAZEL) $(BAZEL_OPTS) clean
+	-sudo rm -Rf $(BAZEL_CACHE)
+
+precheck: force-non-root
+	tools/check_repositories.sh
+
+FORMAT_EXCLUDED_PREFIXES = "./linux/" "./proxylib/" "./starter/"  "./vendor/" "./go/" "./envoy_build_config/"
+
+check: force-non-root
+	bazel $(BAZEL_OPTS) run @envoy//tools/code_format:check_format -- --path "$(PWD)" --skip_envoy_build_rule_check --add-excluded-prefixes $(FORMAT_EXCLUDED_PREFIXES) --bazel_tools_check_excluded_paths="./" --build_fixer_check_excluded_paths="./" check || echo "Format check failed, run 'make fix' locally to fix formatting errors."
+
+fix: force-non-root
+	bazel $(BAZEL_OPTS) run @envoy//tools/code_format:check_format -- --path "$(PWD)" --skip_envoy_build_rule_check --add-excluded-prefixes $(FORMAT_EXCLUDED_PREFIXES) --bazel_tools_check_excluded_paths="." --build_fixer_check_excluded_paths="./" fix
+
+# Run tests without debug by default.
+tests:  $(COMPILER_DEP) force-non-root SOURCE_VERSION install-bazel
+	$(BAZEL) $(BAZEL_OPTS) test $(BAZEL_BUILD_OPTS) //:envoy_binary_test $(BAZEL_FILTER)
+	$(BAZEL) $(BAZEL_OPTS) test $(BAZEL_BUILD_OPTS) $(BAZEL_TEST_OPTS) //tests/... $(BAZEL_FILTER)
+
+debug-tests:  $(COMPILER_DEP) force-non-root SOURCE_VERSION install-bazel
+	$(BAZEL) $(BAZEL_OPTS) test $(BAZEL_BUILD_OPTS) -c dbg $(BAZEL_TEST_OPTS) //:envoy_binary_test $(BAZEL_FILTER)
+	$(BAZEL) $(BAZEL_OPTS) test $(BAZEL_BUILD_OPTS) -c dbg $(BAZEL_TEST_OPTS) //tests/... $(BAZEL_FILTER)

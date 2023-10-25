@@ -1,0 +1,222 @@
+# Copyright 2017-2021 Authors of Cilium
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+ISTIO_VERSION = $(shell grep "ARG ISTIO_VERSION=" Dockerfile.istio_proxy | cut -d = -f2)
+
+# Always use buildx
+DOCKER := $(QUIET)DOCKER_BUILDKIT=1 docker buildx
+
+DOCKER_DEV_ACCOUNT ?= quay.io/cilium
+# CACHE_REF ?= docker.io/cilium/cilium-dev:cilium-envoy-cache
+CACHE_REF ?=
+DOCKER_BUILD_OPTS ?=
+DOCKER_CACHE_OPTS ?=
+ifndef NO_CACHE
+  ifneq ($(CACHE_REF),)
+    DOCKER_CACHE_OPTS += --cache-from=$(CACHE_REF)
+  endif
+endif
+
+ifeq ($(ARCH),amd64)
+  DOCKER_PLATFORMS := --platform=linux/amd64
+else ifeq ($(ARCH),arm64)
+  DOCKER_PLATFORMS := --platform=linux/arm64
+else ifeq ($(ARCH),multi)
+  DOCKER_PLATFORMS := --platform=linux/arm64,linux/amd64
+endif
+DOCKER_BUILDER := $(shell docker buildx ls | grep -E -e "[a-zA-Z0-9-]+ \*" | cut -d ' ' -f1)
+ifdef DOCKER_PLATFORMS
+  ifneq (,$(filter $(DOCKER_BUILDER),default desktop-linux))
+    DOCKER_BUILDKIT_DRIVER :=
+    ifdef DOCKER_BUILDKIT_IMAGE
+      DOCKER_BUILDKIT_DRIVER := --driver docker-container --driver-opt image=$(DOCKER_BUILDKIT_IMAGE)
+    endif
+    BUILDER_SETUP := $(shell docker buildx create $(DOCKER_PLATFORMS) $(DOCKER_BUILDKIT_DRIVER) --use)
+    DOCKER_BUILDER := $(shell docker buildx ls | grep -E -e "[a-zA-Z0-9-]+ \*" | cut -d ' ' -f1)
+  endif
+endif
+ifneq ($(DOCKER_BUILDER),default)
+  # Only insert '--push' if user did not pass a conflicting '--output' option
+  ifeq ($(findstring --output,$(DOCKER_BUILD_OPTS)),)
+    ifeq ($(findstring --load,$(DOCKER_BUILD_OPTS)),)
+      DOCKER_BUILD_OPTS += --push
+    endif
+  endif
+  DOCKER_BUILD_OPTS += $(DOCKER_PLATFORMS)
+  ifdef CACHE_PUSH
+    DOCKER_CACHE_OPTS += --cache-to=$(CACHE_PUSH),mode=max
+  endif
+endif
+$(info Using Docker Buildx builder "$(DOCKER_BUILDER)" with build flags "$(DOCKER_BUILD_OPTS)".)
+
+SLASH = -
+ARCH ?= $(subst aarch64,arm64,$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))))
+# Add -<arch> suffix if ARCH is not "multi"
+ifeq ($(ARCH),multi)
+  ARCH :=
+else
+  IMAGE_ARCH := $(SLASH)$(ARCH)
+endif
+
+SOURCE_VERSION :=
+
+# This makefile may only be used with a git repo present
+SOURCE_VERSION := $(shell git rev-parse HEAD)
+SOURCE_VERSION: force
+	@if [ "$(SOURCE_VERSION)" != "`cat 2>/dev/null SOURCE_VERSION`" ] ; then echo "$(SOURCE_VERSION)" >SOURCE_VERSION; fi
+
+ENVOY_VERSION := $(shell cat ENVOY_VERSION)
+BAZEL_VERSION := $(shell cat .bazelversion)
+BRANCH_NAME ?= $(shell git rev-parse --abbrev-ref HEAD)
+BRANCH_TAG := $(shell echo $(BRANCH_NAME) | tr -c '[:alnum:]_.\n-' '-')
+
+# target for builder archive
+BUILDER_ARCHIVE_TAG ?= main-archive-latest
+TESTS_ARCHIVE_TAG ?= test-main-archive-latest
+
+BUILDER_DOCKER_HASH=$(shell git ls-tree --full-tree HEAD -- ./Dockerfile.builder | awk '{ print $$3 }')
+TEST_BUILDER_DOCKER_HASH=$(shell git ls-tree --full-tree HEAD -- ./Dockerfile.builder.tests | awk '{ print $$3 }')
+BUILDER_BASE_TAG ?= $(BAZEL_VERSION)-$(BUILDER_DOCKER_HASH)
+TESTS_BUILDER_BASE_TAG ?= test-$(BAZEL_VERSION)-$(TEST_BUILDER_DOCKER_HASH)
+BUILDER_BASE ?= $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(BUILDER_BASE_TAG)
+TESTS_BUILDER_BASE ?= $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(TESTS_BUILDER_BASE_TAG)
+
+BUILD_IMAGE_OPTS := --build-arg BUILDER_BASE="$(BUILDER_BASE)"
+TESTS_IMAGE_OPTS := --build-arg BUILDER_BASE="$(TESTS_BUILDER_BASE)"
+
+ifndef NO_ARCHIVE
+  ifndef ARCHIVE_IMAGE
+    # Default builder refresh image ref
+    ARCHIVE_IMAGE := $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(BUILDER_ARCHIVE_TAG)
+    TESTS_ARCHIVE_IMAGE := $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(TESTS_ARCHIVE_TAG)
+  else
+    TESTS_ARCHIVE_IMAGE := $(ARCHIVE_IMAGE)
+  endif
+endif
+
+ifdef NO_CACHE
+  DOCKER_CACHE_OPTS += --build-arg NO_CACHE=$(NO_CACHE)
+  ifeq ($(NO_CACHE),2)
+    DOCKER_CACHE_OPTS += --no-cache
+  endif
+endif
+
+ifdef DEBUG
+  DOCKER_BUILD_OPTS += --build-arg DEBUG=$(DEBUG)
+  DEBUG_TAG := -debug
+endif
+
+ifdef ARCHIVE_IMAGE
+  BUILD_IMAGE_OPTS += --build-arg ARCHIVE_IMAGE=$(ARCHIVE_IMAGE)
+endif
+
+ifdef TESTS_ARCHIVE_IMAGE
+  TESTS_IMAGE_OPTS += --build-arg ARCHIVE_IMAGE=$(TESTS_ARCHIVE_IMAGE)
+endif
+
+# Builder image consists only of build tools, so it only needs .bazelversion
+Dockerfile.builder.dockerignore:
+	echo "*" >$@
+	echo "!/.bazelversion" >>$@
+
+# Builder image for tests consists only of build tools, so it only needs .bazelversion
+Dockerfile.builder.tests.dockerignore:
+	echo "*" >$@
+	echo "!/.bazelversion" >>$@
+
+# Release does not need Go API or test files
+Dockerfile.dockerignore: .dockerignore Makefile.docker
+	cp $< $@
+	echo "/tests/" >>$@
+	echo "/Makefile.api" >>$@
+	echo "/envoy_binary_test.sh" >>$@
+
+Dockerfile.tests.dockerignore: .dockerignore Makefile.docker
+	cp $< $@
+	echo "/Makefile.api" >>$@
+
+# None of the docker builds need these. '-H' to not follow symbolic links.
+GIT_IGNORE_FILES := $(shell find -H . -not -path "./_build*" -not -path "./vendor*" -name .gitignore -print)
+.dockerignore: .gitignore Makefile.docker
+	echo "/.git/" >$@
+	echo $(dir $(GIT_IGNORE_FILES)) | tr ' ' '\n' | xargs -P1 -n1 -I {DIR} sed \
+	    -e '# Remove lines with white space, comments and files that must be passed to docker, "$$" due to make. #' \
+		-e '/^[[:space:]]*$$/d' -e '/^#/d' -e '/SOURCE_VERSION/d' \
+	    -e '# Apply pattern in all directories if it contains no "/", keep "!" up front. #' \
+		-e '/^[^!/][^/]*$$/s<^<**/<' -e '/^![^/]*$$/s<^!<!**/<' \
+            -e '# Prepend with the directory name, keep "!" up front. #' \
+		-e '/^[^!]/s<^<{DIR}<' -e '/^!/s<^!<!{DIR}<' \
+	    -e '# Remove leading "./", keep "!" up front. #' \
+		-e 's<^\./<<' -e 's<^!\./<!<' \
+	    -e '# Append newline to the last line if missing. GNU sed does not do this automatically. #' \
+		-e "$$a" \
+	    $< >>$@
+	echo "/.gitignore" >>$@
+	echo "/Dockerfile*" >>$@
+	echo "/Makefile.docker" >>$@
+	echo "/README*" >>$@
+	echo "/envoy_bootstrap_v2.patch" >>$@
+
+.PHONY: docker-image-builder
+docker-image-builder: Dockerfile.builder SOURCE_VERSION Dockerfile.builder.dockerignore
+	$(DOCKER) build $(DOCKER_BUILD_OPTS) --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" --build-arg BUILDER_BASE="$(BUILDER_BASE)" -f $< -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(BUILDER_BASE_TAG) .
+
+.PHONY: docker-image-builder-tests
+docker-image-builder-tests: Dockerfile.builder.tests SOURCE_VERSION Dockerfile.builder.tests.dockerignore
+	$(DOCKER) build $(DOCKER_BUILD_OPTS) --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" --build-arg BUILDER_BASE="$(TESTS_BUILDER_BASE)" -f $< -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(TESTS_BUILDER_BASE_TAG) .
+
+.PHONY: docker-builder-archive
+docker-builder-archive: Dockerfile SOURCE_VERSION Dockerfile.dockerignore
+	$(DOCKER) build --target builder-archive $(DOCKER_BUILD_OPTS) $(DOCKER_CACHE_OPTS) $(BUILD_IMAGE_OPTS) --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" --build-arg COPY_CACHE_EXT=.new -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(BUILDER_ARCHIVE_TAG) .
+
+.PHONY: empty-docker-builder-archive
+empty-docker-builder-archive: Dockerfile Dockerfile.dockerignore
+	$(DOCKER) build --target empty-builder-archive $(DOCKER_BUILD_OPTS) -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(BUILDER_ARCHIVE_TAG) .
+
+.PHONY: docker-tests-archive
+docker-tests-archive: Dockerfile.tests SOURCE_VERSION Dockerfile.tests.dockerignore
+	$(DOCKER) build --target builder-archive $(DOCKER_BUILD_OPTS) $(DOCKER_CACHE_OPTS) $(TESTS_IMAGE_OPTS) --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" --build-arg COPY_CACHE_EXT=.new -f $< -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(TESTS_ARCHIVE_TAG) .
+
+.PHONY: empty-docker-tests-archive
+empty-docker-tests-archive: Dockerfile.tests Dockerfile.tests.dockerignore
+	$(DOCKER) build --target empty-builder-archive $(DOCKER_BUILD_OPTS) --build-arg BUILDER_BASE="$(TESTS_BUILDER_BASE)" -f $< -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-builder:$(TESTS_ARCHIVE_TAG) .
+
+ifeq ($(BRANCH_TAG),main)
+  DOCKER_TESTS_TAGS += -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy:latest$(IMAGE_ARCH)$(DEBUG_TAG)-testlogs
+else
+  DOCKER_TESTS_TAGS ?= -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-dev:$(BRANCH_TAG)$(IMAGE_ARCH)$(DEBUG_TAG)-testlogs
+endif
+
+.PHONY: docker-tests
+docker-tests: Dockerfile.tests SOURCE_VERSION Dockerfile.tests.dockerignore
+	$(DOCKER) build --progress=plain $(subst --push,--load,$(DOCKER_BUILD_OPTS)) $(DOCKER_CACHE_OPTS) $(TESTS_IMAGE_OPTS) --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" --build-arg BAZEL_TEST_OPTS="$(BAZEL_TEST_OPTS)" -f $< $(DOCKER_TESTS_TAGS) .
+
+ifeq ($(BRANCH_TAG),main)
+  DOCKER_IMAGE_ENVOY_TAGS := -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy:$(SOURCE_VERSION)$(IMAGE_ARCH)$(DEBUG_TAG)
+  DOCKER_IMAGE_ENVOY_TAGS += -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy:latest$(IMAGE_ARCH)$(DEBUG_TAG)
+else
+  DOCKER_IMAGE_ENVOY_TAGS ?= -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-dev:$(BRANCH_TAG)$(IMAGE_ARCH)$(DEBUG_TAG)
+  DOCKER_IMAGE_ENVOY_TAGS += -t $(DOCKER_DEV_ACCOUNT)/cilium-envoy-dev:$(SOURCE_VERSION)$(IMAGE_ARCH)$(DEBUG_TAG)
+endif
+
+.PHONY: docker-image-envoy
+docker-image-envoy: Dockerfile SOURCE_VERSION Dockerfile.dockerignore
+	@$(ECHO_GEN) docker-image-envoy
+	$(DOCKER) build $(DOCKER_BUILD_OPTS) $(DOCKER_CACHE_OPTS) $(BUILD_IMAGE_OPTS) --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" $(DOCKER_IMAGE_ENVOY_TAGS) .
+
+docker-istio-proxy: Dockerfile.istio_proxy envoy_bootstrap_tmpl.json
+	@$(ECHO_GEN) docker-istio-proxy
+	$(DOCKER) build --build-arg BAZEL_BUILD_OPTS="$(EXTRA_BAZEL_BUILD_OPTS)" -f $< -t cilium/istio_proxy:$(ISTIO_VERSION) .
+	$(QUIET)echo "Push like this when ready:"
+	$(QUIET)echo "docker push cilium/istio_proxy:$(ISTIO_VERSION)"

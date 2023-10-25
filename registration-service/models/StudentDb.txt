@@ -1,0 +1,105 @@
+// package models
+
+// import (
+// 	"database/sql"
+// 	"log"
+// 	"net/http"
+
+// 	"github.com/gin-gonic/gin"
+// )
+
+// func GetAllStudents(c *gin.Context) {
+
+// 	db, err := sql.Open("mysql", "root:password@tcp(127.0.0.1:3306)/univ_db")
+// 	if err != nil {
+// 		log.Fatal("Unable to connect to database ", err.Error())
+// 		return
+// 	}
+
+// 	defer db.Close()
+
+// 	results, err := db.Query("SELECT * FROM Student")
+
+// 	if err != nil {
+// 		log.Fatal(err.Error())
+// 		return
+// 	}
+
+// 	students := []Student{}
+
+// 	for results.Next() {
+// 		var std Student
+
+// 		err = results.Scan(&std.ID, &std.Firstname, &std.Lastname, &std.City, &std.Course)
+// 		if err != nil {
+// 			panic(err.Error())
+// 		}
+
+// 		students = append(students, std)
+
+// 	}
+// 	c.IndentedJSON(http.StatusOK, students)
+
+// }
+
+// // func RegisterStudent(c *gin.Context) {
+// // 	var newStudent Student
+// // 	if err := c.BindJSON(&newStudent); err != nil {
+// // 		c.IndentedJSON(http.StatusBadRequest, gin.H{
+// // 			"message": "Invalid body",
+// // 		})
+// // 		return
+// // 	}
+
+// // 	db, err := sql.Open("mysql", "root:password@tcp(127.0.0.1:3306)/univ_db")
+// // 	if err != nil {
+// // 		log.Fatal("Unable to connect to database ", err.Error())
+// // 		return
+// // 	}
+// // 	defer db.Close()
+
+// // 	insert, err := db.Query(
+// // 		"INSERT INTO Student (id, firstname, lastname, city, course) VALUES(?,?,?,?,?)",
+// // 		newStudent.ID, newStudent.Firstname, newStudent.Lastname, newStudent.City, newStudent.City)
+
+// // 	if err != nil {
+// // 		log.Println(err.Error())
+// // 	}
+
+// // 	c.IndentedJSON(http.StatusCreated, newStudent)
+// // 	defer insert.Close()
+
+// // }
+
+// // func FindStudentById(c *gin.Context) {
+
+// // 	db, err := sql.Open("mysql", "root:password@tcp(127.0.0.1:3306)/univ_db")
+// // 	if err != nil {
+// // 		log.Fatal("Unable to connect to database ", err.Error())
+// // 		return
+// // 	}
+// // 	defer db.Close()
+
+// // 	id := c.Param("id")
+// // 	std := &Student{}
+
+// // 	results, err := db.Query("SELECT * FROM Student WHERE id=?", id)
+// // 	if err != nil {
+// // 		return
+// // 	}
+
+// // 	if results.Next() {
+// // 		err = results.Scan(&std.ID, &std.Firstname, &std.Lastname, &std.City, &std.Course)
+// // 		if err != nil {
+
+// // 			return
+// // 		}
+// // 	} else {
+// // 		c.IndentedJSON(http.StatusNotFound, gin.H{
+// // 			"message": "Student Not Found",
+// // 		})
+// // 		return
+// // 	}
+
+// // 	c.IndentedJSON(http.StatusOK, std)
+// // }

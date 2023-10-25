@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+option go_package = "github.com/cilium/proxy/go/cilium/api;cilium";
+
+package cilium;
+
+message BpfMetadata {
+  // File system root for bpf. Defaults to "/sys/fs/bpf" if left empty.
+  string bpf_root = 1;
+
+  // 'true' if the filter is on ingress listener, 'false' for egress listener.
+  bool is_ingress = 2;
+
+  // Use of the original source address requires kernel datapath support which
+  // may or may not be available. 'true' if original source address
+  // should be used. Original source address use may still be
+  // skipped in scenarios where it is knows to not work.
+  bool use_original_source_address = 3;
+
+  // True if the listener is used for an L7 LB. In this case policy enforcement is done on the
+  // destination selected by the listener rather than on the original destination address. For
+  // local sources the source endpoint ID is set in socket mark instead of source security ID if
+  // 'use_original_source_address' is also true, so that the local source's egress policy is
+  // enforced on the bpf datapath.
+  // Only valid for egress.
+  bool is_l7lb = 4;
+
+  // Source address to be used whenever the original source address is not used.
+  // Either ipv4_source_address or ipv6_source_address depending on the address
+  // family of the destination address. If left empty, and no Envoy Cluster Bind
+  // Config is provided, the source address will be picked by the local IP stack.
+  string ipv4_source_address = 5;
+  string ipv6_source_address = 6;
+
+  // True if policy should be enforced on l7 LB used. The policy bound to the configured
+  // ipv[46]_source_addresses, which must be explicitly set, applies. Ingress policy is
+  // enforced on the security identity of the original (e.g., external) source. Egress
+  // policy is enforced on the security identity of the backend selected by the load balancer.
+  //
+  // Deprecation note: This option will be forced 'true' and deprecated when Cilium 1.15 is
+  // the oldest supported release.
+  bool enforce_policy_on_l7lb = 7;
+
+  // proxy_id is passed to access log messages and allows relating access log messages to
+  // listeners.
+  uint32 proxy_id = 8;
+}

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: xdp-synproxy
+  labels:
+    app: xdp-synproxy
+spec:
+  selector:
+    matchLabels:
+      app: xdp-synproxy
+  template:
+    metadata:
+      labels:
+        app: xdp-synproxy
+    spec:
+      hostNetwork: true
+      containers:
+        - args: ["-i", "eth0"]
+          command: ["python3", "http-parse.py"]
+          image: http-parser:1.0
+          imagePullPolicy: IfNotPresent
+          # lifecycle:
+          #   postStart:
+          #     exec:
+          #       command:
+          #       - "/install-rules.sh"
+          #       - "--interface=ens192"
+          #       - "--ports=80,8080"
+          #   preStop:
+          #     exec:
+          #       command:
+          #       - "/uninstall-rules.sh"
+          #       - "--interface=ens192"
+          #       - "--ports=80,8080"
+          name: xdp-synproxy
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+            privileged: true
+          volumeMounts:
+            - name: lib-modules
+              mountPath: /lib/modules
+            - name: usr-src
+              mountPath: /usr/src
+      volumes:
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: usr-src
+          hostPath:
+            path: /usr/src

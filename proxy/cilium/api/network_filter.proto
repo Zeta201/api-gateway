@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+option go_package = "github.com/cilium/proxy/go/cilium/api;cilium";
+
+package cilium;
+
+message NetworkFilter {
+  // Path to the proxylib to be opened
+  string proxylib = 1;
+
+  // Transparent set of parameters provided for proxylib initialization
+  map<string, string> proxylib_params = 2;
+
+  // Path to the unix domain socket for the cilium access log.
+  string access_log_path = 5;
+}

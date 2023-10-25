@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+option go_package = "github.com/cilium/proxy/go/cilium/api;cilium";
+
+package cilium;
+
+message KeyValue {
+  string key = 1;
+  string value = 2;
+}
+
+enum HttpProtocol {
+  HTTP10 = 0;
+  HTTP11 = 1;
+  HTTP2 = 2;
+}
+
+enum EntryType {
+  Request = 0;
+  Response = 1;
+  Denied = 2;
+}
+
+message HttpLogEntry {
+  HttpProtocol http_protocol = 1;
+
+  // Request info that is also retained for the response
+  string scheme = 2; // Envoy "x-forwarded-proto", e.g., "http", "https"
+  string host = 3;   // Envoy ":authority" header
+  string path = 4;   // Envoy ":path" header
+  string method = 5; // Envoy ":method" header
+
+  // Request or response headers not included above
+  repeated KeyValue headers = 6;
+
+  // Response info
+  uint32 status = 7; // Envoy ":status" header, zero for request
+
+  // missing_headers includes both headers that were added to the
+  // request, and headers that were merely logged as missing
+  repeated KeyValue missing_headers = 8;
+
+  // rejected_headers includes headers that were flagged as unallowed,
+  // which may have been removed, or merely logged and the request still
+  // allowed, or the request may have been dropped due to them.
+  repeated KeyValue rejected_headers = 9;
+}
+
+message KafkaLogEntry {
+  // correlation_id is a user-supplied integer value that will be passed
+  // back with the response
+  int32 correlation_id = 1;
+
+  // error_code is the Kafka error code being returned
+  // Ref. https://kafka.apache.org/protocol#protocol_error_codes
+  int32 error_code = 2;
+
+  // api_version of the Kafka api used
+  // Ref. https://kafka.apache.org/protocol#protocol_compatibility
+  int32 api_version = 3;
+
+  // api_key for Kafka message
+  // Reference: https://kafka.apache.org/protocol#protocol_api_keys
+  int32 api_key = 4;
+
+  // Topics of the request
+  // Optional, as not all messages have topics (ex. LeaveGroup, Heartbeat)
+  repeated string topics = 5;
+}
+
+message L7LogEntry {
+  string proto = 1;
+  map<string, string> fields = 2;
+}
+
+message LogEntry {
+  // The time that Cilium filter captured this log entry,
+  // in, nanoseconds since 1/1/1970.
+  uint64 timestamp = 1;
+
+  // 'true' if the request was received by an ingress listener,
+  // 'false' if received by an egress listener
+  bool is_ingress = 15;
+
+  EntryType entry_type = 3;
+
+  // Cilium network policy resource name
+  string policy_name = 4;
+
+  // proxy_id identifies the listener this message relates to,
+  // as configured via the bpf_metadata listener filter
+  uint32 proxy_id = 17;
+
+  // Cilium rule reference
+  string cilium_rule_ref = 5;
+
+  // Cilium security ID of the source and destination
+  uint32 source_security_id = 6;
+  uint32 destination_security_id = 16;
+
+  // These fields record the original source and destination addresses,
+  // stored in ipv4:port or [ipv6]:port format.
+  string source_address = 7;
+  string destination_address = 8;
+
+  oneof l7 {
+    HttpLogEntry http = 100;
+    KafkaLogEntry kafka = 101;
+    L7LogEntry generic_l7 = 102;
+  }
+}

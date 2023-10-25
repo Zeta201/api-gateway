@@ -1,0 +1,13 @@
+ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
+include $(ROOT_DIR)/Makefile.quiet
+
+PREFIX?=/usr
+BINDIR?=$(PREFIX)/bin
+LIBDIR?=$(PREFIX)/lib
+RUNDIR?=/var/run
+CONFDIR?=/etc
+
+# GO_NOQUIET should not have any Makefile directives.
+GO_NOQUIET = go
+GO = $(QUIET)$(GO_NOQUIET)
+INSTALL = $(QUIET)install

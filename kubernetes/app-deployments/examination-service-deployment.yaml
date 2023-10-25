@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: examination-deployment
+spec:
+  selector:
+    matchLabels:
+      app: examination-service
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: examination-service
+    spec:
+      containers:
+        - name: examination-service
+          image: examination-service:1.0
+          ports:
+            - containerPort: 9090
+          env:   # Setting Enviornmental Variables
+            - name: DB_HOST
+              value: mysql
+              
+            - name: DB_NAME  # Setting Database name from configMap
+              value: school_db
+
+            - name: DB_USERNAME
+              value: root
+
+            - name: DB_PASSWORD
+              value: root
+            
+---
+
+apiVersion: v1 # Kubernetes API version
+kind: Service # Kubernetes resource kind we are creating
+metadata: # Metadata of the resource kind we are creating
+  name: examination-service
+spec:
+  selector:
+    app: examination-service
+  ports:
+    - protocol: "TCP"
+      port: 9090 # The port that the service is running on in the cluster
+      targetPort: 9090 # The port exposed by the service
+  type: ClusterIP # type of the service.
