@@ -19,6 +19,6 @@ func (service UserService) Save(user model.User) error {
 	return service.repository.Save(user)
 }
 
-func (service UserService) LogIn(user model.User) (model.User, error) {
+func (service UserService) LogIn(user model.User) (string, error) {
 	return service.repository.LogIn(user)
 }

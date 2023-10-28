@@ -6,6 +6,10 @@ type User struct {
 	Password string `gorm:"size:200" json:"password"`
 }
 
+type UserCred struct {
+	Token string `json:"token"`
+}
+
 func (user *User) TableName() string {
 	return "User"
 }

@@ -53,18 +53,18 @@ func (controller *UserController) Login(ctx *gin.Context) {
 		util.ErrorJSON(ctx, http.StatusBadRequest, "Password is required")
 	}
 
-	foundUser, err := controller.service.LogIn(user)
+	token, err := controller.service.LogIn(user)
 
 	if err != nil {
-		util.ErrorJSON(ctx, http.StatusBadRequest, "Error finding user")
+		util.ErrorJSON(ctx, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	response := foundUser.ResponseMap()
+	// response := foundUser.ResponseMap()
 
 	ctx.JSON(http.StatusOK, &util.Response{
 		Success: true,
 		Message: "User found",
-		Data:    &response,
+		Data:    &token,
 	})
 }

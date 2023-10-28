@@ -21,6 +21,11 @@ func NewGinRouter() GinRouter {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	// httpRouter.Use(func(ctx *gin.Context) {
+	// 	log.Println(ctx.GetHeader("User-Agent"))
+	// 	log.Println("Hello there!")
+	// 	ctx.Next()
+	// })
 
 	httpRouter.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"data": "Up and Running..."})
