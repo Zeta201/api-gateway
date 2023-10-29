@@ -11,8 +11,10 @@ import (
 	"github.com/cilium/proxy/proxylib/accesslog"
 	_ "github.com/cilium/proxy/proxylib/auth"
 	_ "github.com/cilium/proxy/proxylib/cassandra"
+	_ "github.com/cilium/proxy/proxylib/httpredirect"
 	_ "github.com/cilium/proxy/proxylib/kafka"
 	_ "github.com/cilium/proxy/proxylib/memcached"
+
 	"github.com/cilium/proxy/proxylib/npds"
 	"github.com/cilium/proxy/proxylib/proxylib"
 	_ "github.com/cilium/proxy/proxylib/r2d2"
